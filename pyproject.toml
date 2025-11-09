@@ -1,0 +1,76 @@
+[tool.poetry]
+package-mode = false
+
+[tool.taskipy.tasks]
+lint = "ruff check --fix . ; pyright"
+typecheck = "pyright"
+update-thirdparty = "python -m misc.UpdateThirdparty latest"
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.12"
+curl-cffi = "^0.13.0"
+httpx = {version = "^0.28.1", extras = ["http2"]}
+pyright = "^1.1.403"
+ruff = "^0.9.1"
+zendriver = "^0.15.0"
+
+[tool.poetry.group.dev.dependencies]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+# インデントの幅を4スペースに設定
+indent-width = 4
+# Python 3.11 を利用する
+target-version = "py311"
+# data/, thirdparty/ ディレクトリは対象から除外する
+extend-exclude = ["data/", "thirdparty/"]
+
+[tool.ruff.lint]
+# flake8, pycodestyle, pyupgrade, isort, Ruff 固有のルールを使う
+select = ["F", "E", "W", "UP", "I", "RUF", "TID251"]
+ignore = [
+    "E501",    # 1行の長さを超えている場合の警告を抑制
+    "E731",    # Do not assign a `lambda` expression, use a `def` を抑制
+    "RUF001",  # 全角記号など `ambiguous unicode character` も使いたいため
+    "RUF002",  # 全角記号など `ambiguous unicode character` も使いたいため
+    "RUF003",  # 全角記号など `ambiguous unicode character` も使いたいため
+    "RUF012",
+]
+
+[tool.ruff.lint.isort]
+# インポートブロックの後に2行空ける
+lines-after-imports = 2
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+# Python 3.11 + Pydantic で TypedDict を扱う際は、typing_extensions.TypedDict を使う必要がある
+# ref: https://github.com/langchain-ai/langgraph/pull/2910
+"typing.TypedDict".msg = "Use typing_extensions.TypedDict instead."
+
+[tool.pyright]
+# Python バージョンを指定
+pythonVersion = "3.11"
+# TypeCheckingMode を strict に設定（VSCode の設定と同等）
+typeCheckingMode = "strict"
+# プロジェクトルートを指定
+pythonPlatform = "All"
+# インクルードするパッケージパス
+include = ["app/"]
+# 除外するパス
+exclude = [
+    "**/__pycache__",
+    "**/.venv",
+]
+# VSCode の settings.json の diagnosticSeverityOverrides に対応する設定
+reportConstantRedefinition = "none"
+reportDeprecated = "warning"
+reportMissingTypeStubs = "none"
+reportPrivateImportUsage = "none"
+reportShadowedImports = "none"
+reportUnnecessaryComparison = "none"
+reportUnknownArgumentType = "none"
+reportUnknownMemberType = "none"
+reportUnknownVariableType = "none"
+reportUnusedFunction = "none"
