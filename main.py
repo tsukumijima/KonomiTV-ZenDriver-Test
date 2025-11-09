@@ -67,8 +67,14 @@ async def main():
                         Exception(f'Failed to wait for setup promise: {exception}')
                     )
                 else:
-                    print('[DEBUG] setup.js resolved:', result)
-                    setup_complete_future.set_result(True)
+                    # result.value が厳密に True であることを確認（undefined の可能性を排除）
+                    if result.value is True:
+                        print('[DEBUG] setup.js resolved: true (strictly verified)')
+                        setup_complete_future.set_result(True)
+                    else:
+                        setup_complete_future.set_exception(
+                            Exception(f'Setup promise did not return true. Got: {result.value}')
+                        )
             except Exception as e:
                 setup_complete_future.set_exception(e)
 

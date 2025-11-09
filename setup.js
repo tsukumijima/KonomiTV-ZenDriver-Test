@@ -68,4 +68,6 @@ window.__setupPromise = (async () => {
         // X-Client-Transaction-ID や各ヘッダーの付与はすべて内部で行われる
         return apiClient.graphQL(operationInfo, requestPayload)
     }
+
+    return true;
 })();
