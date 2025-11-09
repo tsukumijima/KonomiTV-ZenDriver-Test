@@ -61,12 +61,17 @@ window.__setupPromise = (async () => {
     console.log("apiClient:", apiClient);
 
     // API クライアントのラッパーを作成し、これを window オブジェクトに公開する
-    window.__invokeGraphQLAPI = (operationName, requestPayload) => {
+    window.__invokeGraphQLAPI = (operationName, requestPayload, additionalFlags = null) => {
         // operationName から operationInfo を取得
         const operationInfo = operationInfoMap[operationName]
         // HTTP リクエストを実行
         // X-Client-Transaction-ID や各ヘッダーの付与はすべて内部で行われる
-        return apiClient.graphQL(operationInfo, requestPayload)
+        if (additionalFlags) {
+            // 第三引数はおそらくサーバーからエラーが返された際に致命的なエラーかをチェックする関数
+            return apiClient.graphQL(operationInfo, requestPayload, () => false, additionalFlags)
+        } else {
+            return apiClient.graphQL(operationInfo, requestPayload);
+        }
     }
 
     return true;
