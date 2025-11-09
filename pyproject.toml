@@ -3,13 +3,11 @@ package-mode = false
 
 [tool.taskipy.tasks]
 lint = "ruff check --fix . ; pyright"
+format = "ruff format ."
 typecheck = "pyright"
-update-thirdparty = "python -m misc.UpdateThirdparty latest"
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.12"
-curl-cffi = "^0.13.0"
-httpx = {version = "^0.28.1", extras = ["http2"]}
 pyright = "^1.1.403"
 ruff = "^0.9.1"
 zendriver = "^0.15.0"
