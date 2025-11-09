@@ -19,6 +19,8 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.ruff]
+# 1行の長さを最大120文字に設定
+line-length = 120
 # インデントの幅を4スペースに設定
 indent-width = 4
 # Python 3.11 を利用する
@@ -41,6 +43,12 @@ ignore = [
 [tool.ruff.lint.isort]
 # インポートブロックの後に2行空ける
 lines-after-imports = 2
+
+[tool.ruff.format]
+# シングルクオートを使う
+quote-style = "single"
+# インデントにはスペースを使う
+indent-style = "space"
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 # Python 3.11 + Pydantic で TypedDict を扱う際は、typing_extensions.TypedDict を使う必要がある

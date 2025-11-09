@@ -42,9 +42,7 @@ async def main():
             print('[DEBUG] setup.js executed.')
             if exception is not None:
                 # 実行中になんらかの例外が発生した場合
-                setup_complete_future.set_exception(
-                    Exception(f'Failed to execute setup.js: {exception}')
-                )
+                setup_complete_future.set_exception(Exception(f'Failed to execute setup.js: {exception}'))
         except Exception as e:
             setup_complete_future.set_exception(e)
         finally:
@@ -63,9 +61,7 @@ async def main():
                 )
                 print('[DEBUG] setup.js evaluated.')
                 if exception is not None:
-                    setup_complete_future.set_exception(
-                        Exception(f'Failed to wait for setup promise: {exception}')
-                    )
+                    setup_complete_future.set_exception(Exception(f'Failed to wait for setup promise: {exception}'))
                 else:
                     # result.value が厳密に True であることを確認（undefined の可能性を排除）
                     if result.value is True:
@@ -116,6 +112,7 @@ async def main():
         print('[DEBUG] Browser terminated.')
     except Exception as e:
         print(f'[DEBUG] Error while terminating browser: {e}')
+
 
 if __name__ == '__main__':
     asyncio.run(main())
