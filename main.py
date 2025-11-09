@@ -6,6 +6,7 @@ from zendriver import cdp
 
 
 async def main():
+    print('[DEBUG] Starting browser...')
     browser = await zd.start(
         headless=False,
     )
@@ -51,7 +52,7 @@ async def main():
             await page.send(cdp.debugger.resume())
             # 再開後、window.__setupPromise が解決されるまで待つ
             try:
-                await asyncio.sleep(0.1)  # 再開後に少し待つ
+                await asyncio.sleep(1)  # 再開後に少し待つ (でないと window.__setupPromise がセットされていない)
                 print('[DEBUG] Waiting for setup.js to be resolved...')
                 result, exception = await page.send(
                     cdp.runtime.evaluate(
@@ -73,8 +74,8 @@ async def main():
 
     page.add_handler(cdp.debugger.Paused, on_paused)
 
-    # main.js の1行目にブレークポイントを設定
-    # x.com の main.js は通常 /main.*\.js のようなパスにある
+    # x.com の main.js の1行目にブレークポイントを設定
+    # ブレークポイントが発火すると on_paused ハンドラーが呼ばれ、setup.js が実行される
     breakpoint_id, locations = await page.send(
         cdp.debugger.set_breakpoint_by_url(
             line_number=0,  # 0-based なので 1行目は 0
@@ -87,22 +88,28 @@ async def main():
     page = await browser.get('https://x.com')
     await page.activate()
 
-    # ブレークポイントで停止してセットアップ処理が完了するのを待つ
+    # setup.js に記述したセットアップ処理が完了するまで待つ
     try:
         await asyncio.wait_for(setup_complete_future, timeout=30.0)
-        print('Setup completed successfully')
+        print('[DEBUG] Setup completed successfully.')
     except TimeoutError:
-        print('Timeout: Breakpoint was not hit or setup did not complete within 30 seconds')
+        print('[DEBUG] Timeout: Breakpoint was not hit or setup did not complete within 30 seconds.')
     except Exception as e:
-        print(f'Error during setup: {e}')
+        print(f'[DEBUG] Error during setup: {e}')
+
+    await asyncio.sleep(5)
 
     # Debugger を無効化
     await page.send(cdp.debugger.disable())
-    print('Debugger disabled')
+    print('[DEBUG] Debugger disabled.')
 
-    await asyncio.sleep(5)
-    await browser.stop()
-
+    # ブラウザを停止
+    print('[DEBUG] Waiting for browser to terminate...')
+    try:
+        await browser.stop()
+        print('[DEBUG] Browser terminated.')
+    except Exception as e:
+        print(f'[DEBUG] Error while terminating browser: {e}')
 
 if __name__ == '__main__':
     asyncio.run(main())
