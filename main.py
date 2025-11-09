@@ -174,13 +174,13 @@ async def main():
 
     # x.com の main.js の1行目にブレークポイントを設定
     # ブレークポイントが発火すると on_paused ハンドラーが呼ばれ、setup.js が実行される
-    breakpoint_id, locations = await page.send(
+    breakpoint_id, _ = await page.send(
         cdp.debugger.set_breakpoint_by_url(
             line_number=0,  # 0-based なので 1行目は 0
             url_regex=r'.*main.*\.js',  # main.js をマッチさせる正規表現
         )
     )
-    print(f'[DEBUG] Breakpoint set: {breakpoint_id}, locations: {len(locations)}')
+    print(f'[DEBUG] Breakpoint set. id: {breakpoint_id}')
 
     # x.com に移動
     page = await browser.get('https://x.com/home')
@@ -188,14 +188,14 @@ async def main():
 
     # setup.js に記述したセットアップ処理が完了するまで待つ
     try:
-        await asyncio.wait_for(setup_complete_future, timeout=30.0)
+        await asyncio.wait_for(setup_complete_future, timeout=15.0)
         print('[DEBUG] Setup completed successfully.')
     except TimeoutError:
         print('[DEBUG] Timeout: Breakpoint was not hit or setup did not complete within 30 seconds.')
     except Exception as e:
         print(f'[DEBUG] Error during setup: {e}')
 
-    await asyncio.sleep(5)
+    await asyncio.sleep(10)
 
     # Debugger を無効化
     await page.send(cdp.debugger.disable())
