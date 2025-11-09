@@ -56,8 +56,6 @@ pythonVersion = "3.11"
 typeCheckingMode = "strict"
 # プロジェクトルートを指定
 pythonPlatform = "All"
-# インクルードするパッケージパス
-include = ["app/"]
 # 除外するパス
 exclude = [
     "**/__pycache__",
@@ -68,7 +66,6 @@ reportConstantRedefinition = "none"
 reportDeprecated = "warning"
 reportMissingTypeStubs = "none"
 reportPrivateImportUsage = "none"
-reportShadowedImports = "none"
 reportUnnecessaryComparison = "none"
 reportUnknownArgumentType = "none"
 reportUnknownMemberType = "none"
