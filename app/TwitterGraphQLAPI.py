@@ -157,12 +157,6 @@ class TwitterGraphQLAPI:
             logging.error(f'[TwitterGraphQLAPI] Request error: {request_error}')
             return error_message_prefix + 'Twitter API に接続できませんでした。'
 
-        # HTTP ステータスコードが 200 系以外の場合
-        if status_code is not None and not (200 <= status_code < 300):
-            logging.error(f'[TwitterGraphQLAPI] Failed to invoke GraphQL API. (HTTP Error {status_code})')
-            logging.error(f'[TwitterGraphQLAPI] Response: {response_text}')
-            return error_message_prefix + f'Twitter API から HTTP {status_code} エラーが返されました。'
-
         # JSON でないレスポンスが返ってきた場合
         ## charset=utf-8 が付いている場合もあるので完全一致ではなく部分一致で判定
         if headers and isinstance(headers, dict):
@@ -184,6 +178,13 @@ class TwitterGraphQLAPI:
             try:
                 response_json = json.loads(response_text)
             except Exception as ex:
+                # 何もレスポンスが返ってきていないが、HTTP ステータスコードが 200 系以外で返ってきている場合
+                if status_code is not None and not (200 <= status_code < 300):
+                    logging.error(f'[TwitterGraphQLAPI] Failed to invoke GraphQL API. (HTTP Error {status_code})')
+                    logging.error(f'[TwitterGraphQLAPI] Response: {response_text}')
+                    return error_message_prefix + f'Twitter API から HTTP {status_code} エラーが返されました。'
+
+                # HTTP ステータスコードは 200 系だが、何もレスポンスが返ってきていない場合
                 logging.error('[TwitterGraphQLAPI] Failed to parse response as JSON:', exc_info=ex)
                 return error_message_prefix + 'Twitter API のレスポンスを JSON としてパースできませんでした。'
 
