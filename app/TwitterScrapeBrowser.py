@@ -95,8 +95,8 @@ class TwitterScrapeBrowser:
             await self.page.send(cdp.debugger.enable())
             logging.debug(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] DevTools debugger enabled.')
 
-            # setup.js の内容を読み込む
-            setup_js_path = STATIC_DIR / 'setup.js'
+            # zendriver_setup.js の内容を読み込む
+            setup_js_path = STATIC_DIR / 'zendriver_setup.js'
             setup_js_code = setup_js_path.read_text(encoding='utf-8')
 
             # Debugger.paused イベントをリッスン
@@ -105,7 +105,7 @@ class TwitterScrapeBrowser:
                 assert self.page is not None
                 page = self.page
                 try:
-                    # ブレークポイント停止中に setup.js のコードを設置する
+                    # ブレークポイント停止中に zendriver_setup.js のコードを設置する
                     # await_promise は指定しない（デフォルトは False）ので、スクリプトは設置されるが待機しない
                     _, exception = await page.send(
                         cdp.runtime.evaluate(
@@ -113,20 +113,24 @@ class TwitterScrapeBrowser:
                             return_by_value=True,
                         )
                     )
-                    logging.debug(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] setup.js executed.')
+                    logging.debug(
+                        f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] zendriver_setup.js executed.'
+                    )
                     if exception is not None:
                         # 実行中になんらかの例外が発生した場合
-                        setup_complete_future.set_exception(Exception(f'Failed to execute setup.js: {exception}'))
+                        setup_complete_future.set_exception(
+                            Exception(f'Failed to execute zendriver_setup.js: {exception}')
+                        )
                 except Exception as ex:
                     setup_complete_future.set_exception(ex)
                 finally:
-                    # 実行を再開（再開後、setup.js 内の window.__setupPromise が実行される）
+                    # 実行を再開（再開後、zendriver_setup.js 内の window.__setupPromise が実行される）
                     await page.send(cdp.debugger.resume())
                     # 再開後、window.__setupPromise が解決されるまで待つ
                     try:
                         await asyncio.sleep(1)  # 再開後に少し待つ (でないと window.__setupPromise がセットされていない)
                         logging.info(
-                            f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Waiting for setup.js to be resolved...'
+                            f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Waiting for zendriver_setup.js to be resolved...'
                         )
                         result, exception = await page.send(
                             cdp.runtime.evaluate(
@@ -136,7 +140,7 @@ class TwitterScrapeBrowser:
                             )
                         )
                         logging.debug(
-                            f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] setup.js evaluated.'
+                            f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] zendriver_setup.js evaluated.'
                         )
                         if exception is not None:
                             setup_complete_future.set_exception(
@@ -146,7 +150,7 @@ class TwitterScrapeBrowser:
                             # result.value が厳密に True であることを確認（undefined の可能性を排除）
                             if result.value is True:
                                 logging.debug(
-                                    f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] setup.js resolved: true (strictly verified)'
+                                    f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] zendriver_setup.js resolved: true (strictly verified)'
                                 )
                                 setup_complete_future.set_result(True)
                             else:
@@ -159,7 +163,7 @@ class TwitterScrapeBrowser:
             self.page.add_handler(cdp.debugger.Paused, on_paused)
 
             # x.com の main.js の1行目にブレークポイントを設定
-            # ブレークポイントが発火すると on_paused ハンドラーが呼ばれ、setup.js が実行される
+            # ブレークポイントが発火すると on_paused ハンドラーが呼ばれ、zendriver_setup.js が実行される
             breakpoint_id, _ = await self.page.send(
                 cdp.debugger.set_breakpoint_by_url(
                     line_number=0,  # 0-based なので 1行目は 0
@@ -176,7 +180,7 @@ class TwitterScrapeBrowser:
             self.page = await self.browser.get('https://x.com/')
             await self.page.activate()
 
-            # setup.js に記述したセットアップ処理が完了するまで待つ
+            # zendriver_setup.js に記述したセットアップ処理が完了するまで待つ
             try:
                 await asyncio.wait_for(setup_complete_future, timeout=15.0)
                 logging.info(
