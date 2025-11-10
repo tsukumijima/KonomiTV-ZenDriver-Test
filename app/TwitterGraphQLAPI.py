@@ -124,7 +124,7 @@ class TwitterGraphQLAPI:
         if self.browser.is_setup_complete is not True:
             await self.browser.setup()
 
-        # TwitterScrapeBrowser 経由で GraphQL API リクエストを送信
+        # TwitterScrapeBrowser 経由で GraphQL API に HTTP リクエストを送信
         browser = self.browser
         try:
             raw_response = await browser.invokeGraphQLAPI(
@@ -247,10 +247,10 @@ class TwitterGraphQLAPI:
         self,
     ) -> schemas.TweetUser | schemas.TwitterAPIResult:
         """
-        ログイン中のユーザー情報を取得する
+        現在ログイン中の Twitter アカウントの情報を取得する
 
         Returns:
-            schemas.TweetUser | schemas.TwitterAPIResult: ユーザー情報 (失敗時はエラーメッセージ)
+            schemas.TweetUser | schemas.TwitterAPIResult: Twitter アカウントの情報 (失敗時はエラーメッセージ)
         """
 
         # Twitter GraphQL API にリクエスト
