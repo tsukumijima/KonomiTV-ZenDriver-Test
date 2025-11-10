@@ -2,8 +2,7 @@ import asyncio
 import json
 from typing import Any
 
-import zendriver
-from zendriver import Tab, cdp
+from zendriver import Browser, Config, Tab, cdp
 
 from app import logging
 from app.constants import STATIC_DIR
@@ -27,7 +26,7 @@ class TwitterScrapeBrowser:
         self.twitter_account = twitter_account
 
         # ZenDriver のブラウザインスタンス
-        self.browser: zendriver.Browser | None = None
+        self.browser: Browser | None = None
         # 現在アクティブなタブ（ページ）インスタンス
         self.page: Tab | None = None
 
@@ -54,14 +53,18 @@ class TwitterScrapeBrowser:
 
             # ZenDriver でブラウザを起動
             logging.info(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Starting browser...')
-            self.browser = await zendriver.start(
-                # ユーザーデータディレクトリはあえて設定せず、立ち上げたプロセスが終了したらプロファイルも消えるようにする
-                # Cookie に関しては別途 DB と同期・永続化されていて、毎回セットアップ時に復元されるため問題はない
-                user_data_dir=None,
-                # 今の所ウインドウを表示せずとも問題なく動作しているので、ヘッドレスモードで起動する
-                headless=True,
-                # ブラウザは現在の環境にインストールされているものを自動選択させる
-                browser='auto',
+            self.browser = await Browser.create(
+                Config(
+                    # ユーザーデータディレクトリはあえて設定せず、立ち上げたプロセスが終了したらプロファイルも消えるようにする
+                    # Cookie に関しては別途 DB と同期・永続化されていて、毎回セットアップ時に復元されるため問題はない
+                    user_data_dir=None,
+                    # 今の所ウインドウを表示せずとも問題なく動作しているので、ヘッドレスモードで起動する
+                    headless=True,
+                    # ブラウザは現在の環境にインストールされているものを自動選択させる
+                    browser='auto',
+                    # Accept-Language に使われる値をデフォルトの "en-US,en;q=0.9" から "ja" に変更
+                    lang='ja',
+                )
             )
             logging.info(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Browser started.')
 
