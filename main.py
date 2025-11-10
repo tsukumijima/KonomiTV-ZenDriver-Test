@@ -63,6 +63,42 @@ def parse_netscape_cookie_file(file_path: Path) -> list[Cookie]:
     return cookies
 
 
+def convert_to_cookie_params(cookies: list[Cookie]) -> list[cdp.network.CookieParam]:
+    """
+    Netscape フォーマットの Cookie を CookieParam に変換する
+
+    Args:
+        cookies: Netscape フォーマットの cookie のリスト
+
+    Returns:
+        CookieParam のリスト
+    """
+    cookie_params: list[cdp.network.CookieParam] = []
+    for cookie in cookies:
+        # expires が None の場合は設定しない（セッション cookie として扱われる）
+        expires = None
+        if cookie.expires is not None:
+            # TimeSinceEpoch は秒単位の Unix timestamp
+            expires = cdp.network.TimeSinceEpoch(cookie.expires)
+        # domain から URL を構築（ドットで始まる場合は除去）
+        domain_for_url = cookie.domain.lstrip('.')
+        # secure フラグに応じてプロトコルを選択
+        protocol = 'https' if cookie.secure else 'http'
+        url = f'{protocol}://{domain_for_url}'
+        cookie_params.append(
+            cdp.network.CookieParam(
+                name=cookie.name,
+                value=cookie.value,
+                url=url,
+                domain=cookie.domain if cookie.domain else None,
+                path=cookie.path if cookie.path else None,
+                secure=cookie.secure,
+                expires=expires,
+            )
+        )
+    return cookie_params
+
+
 async def main():
     print('[DEBUG] Starting browser...')
     browser = await zd.start(
@@ -80,37 +116,14 @@ async def main():
         print('[DEBUG] Loading cookies from cookies.txt...')
         cookies = parse_netscape_cookie_file(cookies_txt_path)
         print(f'[DEBUG] Found {len(cookies)} cookies in cookies.txt')
-        # Network ドメインを有効化
-        await page.send(cdp.network.enable())
-        # 各 cookie を設定
-        for cookie in cookies:
-            try:
-                # expires が None の場合は設定しない（セッション cookie として扱われる）
-                expires = None
-                if cookie.expires is not None:
-                    # TimeSinceEpoch は秒単位の Unix timestamp
-                    expires = cdp.network.TimeSinceEpoch(cookie.expires)
-                # domain から URL を構築（ドットで始まる場合は除去）
-                domain_for_url = cookie.domain.lstrip('.')
-                # secure フラグに応じてプロトコルを選択
-                protocol = 'https' if cookie.secure else 'http'
-                url = f'{protocol}://{domain_for_url}'
-                success = await page.send(
-                    cdp.network.set_cookie(
-                        name=cookie.name,
-                        value=cookie.value,
-                        url=url,
-                        path=cookie.path,
-                        secure=cookie.secure if cookie.secure else None,
-                        expires=expires,
-                    )
-                )
-                if success:
-                    print(f'[DEBUG] Cookie set: {cookie.name} for {cookie.domain}')
-                else:
-                    print(f'[DEBUG] Failed to set cookie: {cookie.name} for {cookie.domain}')
-            except Exception as e:
-                print(f'[DEBUG] Error setting cookie {cookie.name}: {e}')
+        # Netscape フォーマットの Cookie を CookieParam に変換
+        cookie_params = convert_to_cookie_params(cookies)
+        # CookieJar を使って一括で設定（高レベル API）
+        try:
+            await browser.cookies.set_all(cookie_params)
+            print(f'[DEBUG] Successfully set {len(cookie_params)} cookies.')
+        except Exception as e:
+            print(f'[DEBUG] Error setting cookies: {e}')
         print('[DEBUG] Cookies loaded.')
     else:
         print('[DEBUG] cookies.txt not found, skipping cookie loading.')
