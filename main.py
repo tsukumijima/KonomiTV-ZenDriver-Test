@@ -129,6 +129,53 @@ def convert_to_cookie_params(cookies: list[Cookie]) -> list[cdp.network.CookiePa
     return cookie_params
 
 
+async def save_twitter_cookies_to_file(browser: zd.Browser, file_path: Path) -> None:
+    """
+    ブラウザから x.com 関連の cookie を取得して Netscape フォーマットのファイルに保存する
+
+    Args:
+        browser (zd.Browser): ZenDriver の Browser インスタンス
+        file_path (Path): 保存先のファイルパス
+    """
+
+    # 全ての cookie を取得
+    all_cookies = await browser.cookies.get_all(requests_cookie_format=False)
+    # requests_cookie_format=False なので cdp.network.Cookie のリストが返される
+    # x.com や twitter.com に関連する cookie をフィルタリング
+    twitter_cookies: list[cdp.network.Cookie] = [
+        c
+        for c in all_cookies
+        if isinstance(c, cdp.network.Cookie) and ('x.com' in c.domain or 'twitter.com' in c.domain)
+    ]
+
+    if not twitter_cookies:
+        print('[DEBUG] No Twitter-related cookies found, skipping save.')
+        return
+
+    # Netscape フォーマットでファイルに保存
+    with file_path.open('w', encoding='utf-8') as f:
+        # Netscape フォーマットのヘッダーを書き込む
+        f.write('# Netscape HTTP Cookie File\n')
+        f.write('# https://curl.haxx.se/rfc/cookie_spec.html\n')
+        f.write('# This is a generated file! Do not edit.\n')
+        f.write('\n')
+        # 各 cookie を Netscape フォーマットで書き込む
+        for cookie in twitter_cookies:
+            # domain がドットで始まる場合は flag を TRUE、そうでなければ FALSE
+            flag = 'TRUE' if cookie.domain.startswith('.') else 'FALSE'
+            # secure フラグを TRUE/FALSE に変換
+            secure_str = 'TRUE' if cookie.secure else 'FALSE'
+            # expires が None の場合は 0（セッション cookie）を設定
+            expires_value = int(cookie.expires) if cookie.expires is not None else 0
+            # Netscape フォーマット: domain, flag, path, secure, expiration, name, value
+            netscape_line = (
+                f'{cookie.domain}\t{flag}\t{cookie.path}\t{secure_str}\t{expires_value}\t{cookie.name}\t{cookie.value}'
+            )
+            f.write(f'{netscape_line}\n')
+
+    print(f'[DEBUG] Successfully saved {len(twitter_cookies)} cookies to cookies.txt.')
+
+
 async def invokeGraphQLAPI(
     page: Tab,
     endpoint_name: str,
@@ -440,6 +487,15 @@ async def main():
         pprint(result)
 
     await asyncio.sleep(110)
+
+    # ブラウザ停止前に x.com 関連の cookie を取得して cookies.txt を更新
+    print('[DEBUG] Saving cookies to cookies.txt...')
+    try:
+        cookies_txt_path = Path(__file__).parent / 'cookies.txt'
+        await save_twitter_cookies_to_file(browser, cookies_txt_path)
+    except Exception as e:
+        print(f'[DEBUG] Error saving cookies: {e}')
+        traceback.print_exc()
 
     # Debugger を無効化
     await page.send(cdp.debugger.disable())
