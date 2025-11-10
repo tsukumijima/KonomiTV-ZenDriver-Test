@@ -188,42 +188,42 @@ async def invokeGraphQLAPI(
             print('[ERROR] [TwitterGraphQLAPI] Response is not a dict.')
             return error_message_prefix + 'Twitter API から不正なレスポンスが返されました。'
 
-        # 生の API レスポンスを取得
-        raw_response = result_value.get('rawResponse')
-        raw_status = result_value.get('rawStatus')
-        raw_response_text = result_value.get('rawResponseText')
-        raw_headers = result_value.get('rawHeaders')
-        xhr_error = result_value.get('xhrError')
+        # API レスポンスを取得
+        parsed_response = result_value.get('parsedResponse')
+        status_code = result_value.get('statusCode')
+        response_text = result_value.get('responseText')
+        headers = result_value.get('headers')
+        request_error = result_value.get('requestError')
 
-        # XHR エラーが発生した場合（接続エラー）
-        if xhr_error:
+        # リクエストエラーが発生した場合（接続エラー）
+        if request_error:
             print('[ERROR] [TwitterGraphQLAPI] Failed to connect to Twitter GraphQL API.')
             return error_message_prefix + 'Twitter API に接続できませんでした。'
 
         # HTTP ステータスコードが 200 系以外の場合
-        if raw_status is not None and not (200 <= raw_status < 300):
-            print(f'[ERROR] [TwitterGraphQLAPI] Failed to invoke GraphQL API. (HTTP Error {raw_status})')
-            if raw_response_text:
-                print(f'[ERROR] [TwitterGraphQLAPI] Response: {raw_response_text}')
-            return error_message_prefix + f'Twitter API から HTTP {raw_status} エラーが返されました。'
+        if status_code is not None and not (200 <= status_code < 300):
+            print(f'[ERROR] [TwitterGraphQLAPI] Failed to invoke GraphQL API. (HTTP Error {status_code})')
+            if response_text:
+                print(f'[ERROR] [TwitterGraphQLAPI] Response: {response_text}')
+            return error_message_prefix + f'Twitter API から HTTP {status_code} エラーが返されました。'
 
         # JSON でないレスポンスが返ってきた場合
         # charset=utf-8 が付いている場合もあるので完全一致ではなく部分一致で判定
-        if raw_headers and isinstance(raw_headers, dict):
-            content_type = raw_headers.get('content-type', '')
+        if headers and isinstance(headers, dict):
+            content_type = headers.get('content-type', '')
             if content_type and 'application/json' not in content_type:
                 print('[ERROR] [TwitterGraphQLAPI] Response is not JSON.')
                 return error_message_prefix + 'Twitter API から不正なレスポンスが返されました。'
 
         # レスポンスを JSON としてパース
         response_json: dict[str, Any] | None = None
-        if raw_response is not None:
+        if parsed_response is not None:
             # JavaScript 側で既にパース済み
-            response_json = raw_response
-        elif raw_response_text:
+            response_json = parsed_response
+        elif response_text:
             # JavaScript 側でパースに失敗した場合、Python 側で再試行
             try:
-                response_json = json.loads(raw_response_text)
+                response_json = json.loads(response_text)
             except Exception:
                 print('[ERROR] [TwitterGraphQLAPI] Failed to parse response as JSON.')
                 # 注: exc_info の代わりに traceback を出力

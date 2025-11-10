@@ -64,16 +64,15 @@ window.__setupPromise = (async () => {
     window.__invokeGraphQLAPI = async (operationName, requestPayload, additionalFlags = null) => {
         // オリジナルの XMLHttpRequest を保存
         const OriginalXHR = window.XMLHttpRequest;
-        // XHR のフックで取得する生の API レスポンスを格納するオブジェクト
-        const xhrData = {
-            rawResponse: null,
-            rawResponseText: null,
-            rawStatus: null,
-            rawStatusText: null,
-            rawHeaders: null,
-            xhrError: null,
+        // HTTP リクエストのフックで取得する API レスポンスを格納するオブジェクト
+        const responseData = {
+            parsedResponse: null,
+            responseText: null,
+            statusCode: null,
+            headers: null,
+            requestError: null,
         };
-        // XHR をフックして生の API レスポンスを取得する
+        // HTTP リクエストをフックして API レスポンスを取得する
         window.XMLHttpRequest = function() {
             const xhr = new OriginalXHR();
             const originalOpen = xhr.open.bind(xhr);
@@ -84,10 +83,9 @@ window.__setupPromise = (async () => {
                     // onreadystatechange をフック
                     xhr.addEventListener('readystatechange', function() {
                         if (xhr.readyState === 4) {
-                            xhrData.rawStatus = xhr.status;
-                            xhrData.rawStatusText = xhr.statusText;
-                            xhrData.rawResponseText = xhr.responseText;
-                            xhrData.rawHeaders = {};
+                            responseData.statusCode = xhr.status;
+                            responseData.responseText = xhr.responseText;
+                            responseData.headers = {};
                             // レスポンスヘッダーを取得
                             const headerString = xhr.getAllResponseHeaders();
                             if (headerString) {
@@ -95,28 +93,28 @@ window.__setupPromise = (async () => {
                                 for (const headerPair of headerPairs) {
                                     const [key, value] = headerPair.split(': ');
                                     if (key && value) {
-                                        xhrData.rawHeaders[key.toLowerCase()] = value;
+                                        responseData.headers[key.toLowerCase()] = value;
                                     }
                                 }
                             }
                             // レスポンスをパース
                             try {
-                                if (xhrData.rawResponseText) {
-                                    xhrData.rawResponse = JSON.parse(xhrData.rawResponseText);
+                                if (responseData.responseText) {
+                                    responseData.parsedResponse = JSON.parse(responseData.responseText);
                                 }
                             } catch (e) {
-                                // JSON パースに失敗した場合は rawResponseText をそのまま保持
-                                xhrData.rawResponse = null;
+                                // JSON パースに失敗した場合は responseText をそのまま保持
+                                responseData.parsedResponse = null;
                             }
                         }
                     });
                     // onerror をフック
                     xhr.addEventListener('error', function() {
-                        xhrData.xhrError = 'XHR request failed';
+                        responseData.requestError = 'Request failed';
                     });
                     // ontimeout をフック
                     xhr.addEventListener('timeout', function() {
-                        xhrData.xhrError = 'XHR request timeout';
+                        responseData.requestError = 'Request timeout';
                     });
                 }
                 return originalOpen(method, url, ...args);
@@ -133,42 +131,32 @@ window.__setupPromise = (async () => {
             const operationInfo = operationInfoMap[operationName]
             // HTTP リクエストを実行
             // X-Client-Transaction-ID や各ヘッダーの付与はすべて内部で行われる
-            let apiResult;
+            // XHR フックで生のレスポンスを取得するため、戻り値は使用しない
             if (additionalFlags) {
                 // 第三引数はおそらくサーバーからエラーが返された際に致命的なエラーかをチェックする関数
-                apiResult = await apiClient.graphQL(operationInfo, requestPayload, () => false, additionalFlags);
+                await apiClient.graphQL(operationInfo, requestPayload, () => false, additionalFlags);
             } else {
-                apiResult = await apiClient.graphQL(operationInfo, requestPayload);
+                await apiClient.graphQL(operationInfo, requestPayload);
             }
             // XMLHttpRequest を元に戻す
             window.XMLHttpRequest = OriginalXHR;
-            // 生のレスポンスを返す
+            // API レスポンスを返す
             return {
-                success: true,
-                rawResponse: xhrData.rawResponse,
-                rawResponseText: xhrData.rawResponseText,
-                rawStatus: xhrData.rawStatus,
-                rawStatusText: xhrData.rawStatusText,
-                rawHeaders: xhrData.rawHeaders,
-                apiResult: apiResult,
+                parsedResponse: responseData.parsedResponse,
+                responseText: responseData.responseText,
+                statusCode: responseData.statusCode,
+                headers: responseData.headers,
             };
         } catch (error) {
             // XMLHttpRequest を元に戻す
             window.XMLHttpRequest = OriginalXHR;
-            // エラーが発生した場合、生のレスポンスがあればそれを含めて返す
+            // エラーが発生した場合、取得できたレスポンスがあればそれを含めて返す
             return {
-                success: false,
-                error: {
-                    message: error.message || error.toString(),
-                    name: error.name,
-                    stack: error.stack,
-                },
-                rawResponse: xhrData.rawResponse,
-                rawResponseText: xhrData.rawResponseText,
-                rawStatus: xhrData.rawStatus,
-                rawStatusText: xhrData.rawStatusText,
-                rawHeaders: xhrData.rawHeaders,
-                xhrError: xhrData.xhrError,
+                parsedResponse: responseData.parsedResponse,
+                responseText: responseData.responseText,
+                statusCode: responseData.statusCode,
+                headers: responseData.headers,
+                requestError: responseData.requestError,
             };
         }
     }
