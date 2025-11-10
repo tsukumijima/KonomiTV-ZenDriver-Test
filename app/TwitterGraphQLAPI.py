@@ -120,18 +120,9 @@ class TwitterGraphQLAPI:
             dict[str, Any] | str: GraphQL API のレスポンス (失敗時は日本語のエラーメッセージを返す)
         """
 
-        # ブラウザがセットアップ済みでない場合はセットアップを実行
+        # ヘッドブラウザがまだ起動していない場合、セットアップ処理を実行
         if self.browser.is_setup_complete is not True:
             await self.browser.setup()
-
-        # GraphQL API の前回呼び出し時刻を更新
-        self.last_graphql_api_call_time = time.time()
-
-        # GraphQL API が呼び出されたので、一定期間後にシャットダウンするタスクをキャンセル
-        if self.shutdown_task is not None:
-            if not self.shutdown_task.done():
-                self.shutdown_task.cancel()
-            self.shutdown_task = None
 
         # TwitterScrapeBrowser 経由で GraphQL API リクエストを送信
         browser = self.browser
@@ -144,29 +135,37 @@ class TwitterGraphQLAPI:
         except Exception as ex:
             logging.error('[TwitterGraphQLAPI] Failed to connect to Twitter GraphQL API:', exc_info=ex)
             return error_message_prefix + 'Twitter API に接続できませんでした。'
+        finally:
+            # GraphQL API リクエスト完了後、更新された可能性があるブラウザの Cookie を DB 側に反映
+            ## こうすることでヘッドレスブラウザと DB 間で Cookie の変更が同期されるはず
+            ## この処理は API リクエストの成功・失敗に関わらず常に API リクエスト完了後に常に実行すべき
+            # TODO: 実際のプロジェクトでは .save() を実行すべきだが、今回は PoC なのでコメントアウト
+            cookies_txt_content = await browser.saveTwitterCookiesToNetscapeFormat()
+            self.twitter_account.access_token_secret = cookies_txt_content
+            # self.twitter_account.save()
 
-        # GraphQL API リクエスト完了後、更新された可能性があるブラウザの Cookie を TwitterAccount.access_token_secret にセット
-        ## こうすることで、基本的にヘッドレスブラウザと DB 間で Cookie が同期される
-        ## API リクエストの成功・失敗に関わらず常に API リクエスト完了後に常に実行すべき
-        # TODO: 実際のプロジェクトでは .save() を実行すべきだが、今回は PoC なのでコメントアウト
-        cookies_txt_content = await browser.saveTwitterCookiesToNetscapeFormat()
-        self.twitter_account.access_token_secret = cookies_txt_content
-        # self.twitter_account.save()
+            # GraphQL API の前回呼び出し時刻を更新
+            self.last_graphql_api_call_time = time.time()
 
-        async def OnShutdown() -> None:
-            # タイムアウト時間に到達するまで待つ
-            await asyncio.sleep(self.BROWSER_IDLE_TIMEOUT)
-            # GraphQL API の前回呼び出し時刻を確認し、タイムアウト時間が経過している場合のみシャットダウン
-            current_time = time.time()
-            if current_time - self.last_graphql_api_call_time >= self.BROWSER_IDLE_TIMEOUT:
-                logging.info(
-                    f'[TwitterGraphQLAPI] Shutting down browser after {self.BROWSER_IDLE_TIMEOUT} seconds of inactivity.'
-                )
-                await self.browser.shutdown()
+            async def OnShutdown() -> None:
+                # タイムアウト時間に到達するまで待つ
+                await asyncio.sleep(self.BROWSER_IDLE_TIMEOUT)
+                # GraphQL API の前回呼び出し時刻を確認し、タイムアウト時間が経過している場合のみ、
+                # しばらく API 呼び出しが行われていないため、リソース節約のためにブラウザをシャットダウンする
+                current_time = time.time()
+                if current_time - self.last_graphql_api_call_time >= self.BROWSER_IDLE_TIMEOUT:
+                    logging.info(
+                        f'[TwitterGraphQLAPI] Shutting down browser after {self.BROWSER_IDLE_TIMEOUT} seconds of inactivity.'
+                    )
+                    await self.browser.shutdown()
 
-        # 一定時間後にブラウザをシャットダウンするタスクをスケジュール
-        ## これも API リクエストの成功・失敗に関わらず常に API リクエスト完了後に常に実行すべき
-        self.shutdown_task = asyncio.create_task(OnShutdown())
+            # 一定時間後にブラウザをシャットダウンするタスクを再スケジュール
+            ## これも API リクエストの成功・失敗に関わらず常に API リクエスト完了後に常に実行すべき
+            if self.shutdown_task is not None:
+                if not self.shutdown_task.done():
+                    self.shutdown_task.cancel()
+                self.shutdown_task = None
+            self.shutdown_task = asyncio.create_task(OnShutdown())
 
         # 生のレスポンスデータを取得
         parsed_response = raw_response['parsedResponse']
