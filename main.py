@@ -199,7 +199,9 @@ async def main():
     print(f'[DEBUG] Breakpoint set. id: {breakpoint_id}')
 
     # x.com に移動
-    page = await browser.get('https://x.com/home')
+    ## x.com/home だと万が一 Cookie セッションが revoke されている場合にログインモーダルが表示されて
+    ## セットアップが解決できないっぽいので、ログイン前の画面がそのまま出てくる x.com/ 直下である必要がある
+    page = await browser.get('https://x.com/')
     await page.activate()
 
     # setup.js に記述したセットアップ処理が完了するまで待つ
