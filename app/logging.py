@@ -31,16 +31,6 @@ def debug(message: Any, *args: Any, exc_info: BaseException | bool | None = None
     Args:
         message (Any): ログメッセージ
     """
-    logger_debug.debug(message, *args, exc_info=exc_info, stacklevel=2)
-
-
-def debug_simple(message: Any, *args: Any, exc_info: BaseException | bool | None = None) -> None:
-    """
-    デバッグログを出力する (スクリプトパス・行番号を出力しない)
-
-    Args:
-        message (Any): ログメッセージ
-    """
     logger.setLevel(logging.DEBUG)
     logger.debug(message, *args, exc_info=exc_info, stacklevel=2)
     logger.setLevel(logging.INFO)
