@@ -1,5 +1,12 @@
+from pathlib import Path
 from typing import Any
 
+
+# ベースディレクトリ
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# スタティックディレクトリ
+STATIC_DIR = BASE_DIR / 'static'
 
 # ロギング設定
 LOGGING_CONFIG: dict[str, Any] = {

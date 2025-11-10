@@ -1,12 +1,12 @@
 import asyncio
 import json
-from pathlib import Path
 from typing import Any
 
 import zendriver
 from zendriver import Tab, cdp
 
 from app import logging
+from app.constants import STATIC_DIR
 from app.TwitterAccount import TwitterAccount
 
 
@@ -96,7 +96,7 @@ class TwitterScrapeBrowser:
             logging.debug(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] DevTools debugger enabled.')
 
             # setup.js の内容を読み込む
-            setup_js_path = Path(__file__).parent.parent / 'setup.js'
+            setup_js_path = STATIC_DIR / 'setup.js'
             setup_js_code = setup_js_path.read_text(encoding='utf-8')
 
             # Debugger.paused イベントをリッスン
@@ -113,7 +113,7 @@ class TwitterScrapeBrowser:
                             return_by_value=True,
                         )
                     )
-                    logging.info(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] setup.js executed.')
+                    logging.debug(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] setup.js executed.')
                     if exception is not None:
                         # 実行中になんらかの例外が発生した場合
                         setup_complete_future.set_exception(Exception(f'Failed to execute setup.js: {exception}'))
@@ -135,7 +135,9 @@ class TwitterScrapeBrowser:
                                 return_by_value=True,
                             )
                         )
-                        logging.info(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] setup.js evaluated.')
+                        logging.debug(
+                            f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] setup.js evaluated.'
+                        )
                         if exception is not None:
                             setup_complete_future.set_exception(
                                 Exception(f'Failed to wait for setup promise: {exception}')
@@ -143,7 +145,7 @@ class TwitterScrapeBrowser:
                         else:
                             # result.value が厳密に True であることを確認（undefined の可能性を排除）
                             if result.value is True:
-                                logging.info(
+                                logging.debug(
                                     f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] setup.js resolved: true (strictly verified)'
                                 )
                                 setup_complete_future.set_result(True)
@@ -183,7 +185,9 @@ class TwitterScrapeBrowser:
                 # セットアップ完了後、もうブレークポイントを打つ必要はないのでデバッガを無効化
                 try:
                     await self.page.send(cdp.debugger.disable())
-                    logging.debug(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Debugger disabled.')
+                    logging.debug(
+                        f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] DevTools debugger disabled.'
+                    )
                 except Exception as ex:
                     logging.error(
                         f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Error disabling debugger: {ex}',
