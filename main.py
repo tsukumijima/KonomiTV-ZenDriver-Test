@@ -21,13 +21,13 @@ async def main():
         logging.info('cookies.txt not found, using empty cookies')
 
     # TwitterAccount インスタンスを作成
-    # access_token は "COOKIES_TXT" 固定、access_token_secret に cookies.txt の内容を入れる
+    # access_token は "NETSCAPE_COOKIE_FILE" 固定、access_token_secret に cookies.txt の内容を入れる
     twitter_account = TwitterAccount()
     twitter_account.id = 1
     twitter_account.name = 'Demo Account'
     twitter_account.screen_name = 'demo_account'
     twitter_account.icon_url = 'https://example.com/icon.png'
-    twitter_account.access_token = 'COOKIES_TXT'
+    twitter_account.access_token = 'NETSCAPE_COOKIE_FILE'
     twitter_account.access_token_secret = cookies_txt_content
 
     # TwitterGraphQLAPI インスタンスを取得（シングルトン）
