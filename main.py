@@ -2,13 +2,12 @@ import asyncio
 import json
 import traceback
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from pprint import pprint
 from typing import Any
 
 import zendriver as zd
-from zendriver import cdp
+from zendriver import Tab, cdp
 
 
 # Twitter API のエラーコードとエラーメッセージの対応表
@@ -55,11 +54,12 @@ def parse_netscape_cookie_file(file_path: Path) -> list[Cookie]:
     Netscape フォーマットの cookie ファイルをパースする
 
     Args:
-        file_path: cookie ファイルのパス
+        file_path (Path): cookie ファイルのパス
 
     Returns:
-        パースされた cookie のリスト
+        list[Cookie]: パースされた cookie のリスト
     """
+
     cookies: list[Cookie] = []
     with file_path.open(encoding='utf-8') as f:
         for line in f:
@@ -97,11 +97,12 @@ def convert_to_cookie_params(cookies: list[Cookie]) -> list[cdp.network.CookiePa
     Netscape フォーマットの Cookie を CookieParam に変換する
 
     Args:
-        cookies: Netscape フォーマットの cookie のリスト
+        cookies (list[Cookie]): Netscape フォーマットの cookie のリスト
 
     Returns:
-        CookieParam のリスト
+        list[cdp.network.CookieParam]: CookieParam のリスト
     """
+
     cookie_params: list[cdp.network.CookieParam] = []
     for cookie in cookies:
         # expires が None の場合は設定しない（セッション cookie として扱われる）
@@ -129,9 +130,10 @@ def convert_to_cookie_params(cookies: list[Cookie]) -> list[cdp.network.CookiePa
 
 
 async def invokeGraphQLAPI(
-    page: Any,
+    page: Tab,
     endpoint_name: str,
     variables: dict[str, Any],
+    additional_flags: dict[str, Any] | None = None,
     error_message_prefix: str = 'Twitter API の操作に失敗しました。',
 ) -> dict[str, Any] | str:
     """
@@ -139,32 +141,26 @@ async def invokeGraphQLAPI(
     実際には GraphQL と言いつつペイロードで JSON を渡しているので謎… (本当に GraphQL なのか？)
 
     Args:
-        page: ZenDriver の Page インスタンス
-        endpoint_name: GraphQL API のエンドポイント名 (例: 'CreateTweet')
-        variables: GraphQL API へのリクエストパラメータ (ペイロードのうち "variables" の部分)
-        error_message_prefix: エラー発生時に付与する prefix (例: 'ツイートの送信に失敗しました。')
+        page (Tab): ZenDriver の Tab インスタンス
+        endpoint_name (str): GraphQL API のエンドポイント名 (例: 'CreateTweet')
+        variables (dict[str, Any]): GraphQL API へのリクエストパラメータ (ペイロードのうち "variables" の部分)
+        additional_flags (dict[str, Any] | None): 追加のフラグ（オプション）
+        error_message_prefix (str): エラー発生時に付与する prefix (例: 'ツイートの送信に失敗しました。')
 
     Returns:
         dict[str, Any] | str: GraphQL API のレスポンス (失敗時は日本語のエラーメッセージを返す)
     """
 
     # JavaScript コードを構築（JSON を文字列化して渡す）
+    # エラー処理は JavaScript 側で完結し、シリアライズ可能なデータを返す
+    additional_flags_json = json.dumps(additional_flags, ensure_ascii=False) if additional_flags is not None else 'null'
     js_code = f"""
     (async () => {{
-        try {{
-            const requestPayload = {json.dumps(variables, ensure_ascii=False)};
-            const result = await window.__invokeGraphQLAPI('{endpoint_name}', requestPayload);
-            return {{ success: true, result: result }};
-        }} catch (error) {{
-            // エラーオブジェクトから必要な情報を取得
-            const errorDetails = {{
-                message: error.message || error.toString(),
-                status: error.status,
-                errors: error.errors,
-                url: error.url,
-            }};
-            return {{ success: false, error: errorDetails }};
-        }}
+        const requestPayload = {json.dumps(variables, ensure_ascii=False)};
+        const additionalFlags = {additional_flags_json};
+        const result = await window.__invokeGraphQLAPI('{endpoint_name}', requestPayload, additionalFlags);
+        console.log('window.__invokeGraphQLAPI() result:', result);
+        return result;
     }})()
     """
 
@@ -178,7 +174,7 @@ async def invokeGraphQLAPI(
             )
         )
 
-        # 予期しないエラーが発生した
+        # 最低限のバリデーション
         if exception is not None:
             print('[ERROR] [TwitterGraphQLAPI] Failed to connect to Twitter GraphQL API.')
             return error_message_prefix + 'Twitter API に接続できませんでした。'
@@ -186,84 +182,86 @@ async def invokeGraphQLAPI(
             print('[ERROR] [TwitterGraphQLAPI] Response is None.')
             return error_message_prefix + 'Twitter API から不正なレスポンスが返されました。'
 
-        # API リクエストに成功した場合
+        # JavaScript 側から返された結果を取得
         result_value = result.value
-        if result_value.get('success') is True:
-            # API レスポンスを取得
-            response_json = result_value.get('result')
-            if response_json is None:
-                print('[ERROR] [TwitterGraphQLAPI] Response result is None.')
-                return error_message_prefix + 'Twitter API から不正なレスポンスが返されました。'
+        if not isinstance(result_value, dict):
+            print('[ERROR] [TwitterGraphQLAPI] Response is not a dict.')
+            return error_message_prefix + 'Twitter API から不正なレスポンスが返されました。'
 
-            # JSON でないレスポンスが返ってきた場合
-            if not isinstance(response_json, dict):
+        # 生の API レスポンスを取得
+        raw_response = result_value.get('rawResponse')
+        raw_status = result_value.get('rawStatus')
+        raw_response_text = result_value.get('rawResponseText')
+        raw_headers = result_value.get('rawHeaders')
+        xhr_error = result_value.get('xhrError')
+
+        # XHR エラーが発生した場合（接続エラー）
+        if xhr_error:
+            print('[ERROR] [TwitterGraphQLAPI] Failed to connect to Twitter GraphQL API.')
+            return error_message_prefix + 'Twitter API に接続できませんでした。'
+
+        # HTTP ステータスコードが 200 系以外の場合
+        if raw_status is not None and not (200 <= raw_status < 300):
+            print(f'[ERROR] [TwitterGraphQLAPI] Failed to invoke GraphQL API. (HTTP Error {raw_status})')
+            if raw_response_text:
+                print(f'[ERROR] [TwitterGraphQLAPI] Response: {raw_response_text}')
+            return error_message_prefix + f'Twitter API から HTTP {raw_status} エラーが返されました。'
+
+        # JSON でないレスポンスが返ってきた場合
+        # charset=utf-8 が付いている場合もあるので完全一致ではなく部分一致で判定
+        if raw_headers and isinstance(raw_headers, dict):
+            content_type = raw_headers.get('content-type', '')
+            if content_type and 'application/json' not in content_type:
                 print('[ERROR] [TwitterGraphQLAPI] Response is not JSON.')
                 return error_message_prefix + 'Twitter API から不正なレスポンスが返されました。'
 
-            # API レスポンスにエラーが含まれていて、かつ data キーが存在しない場合
-            # API レスポンスは Twitter の仕様変更で変わりうるので、ここで判定されなかったと言ってエラーでないとは限らない
-            # なぜか正常にレスポンスが含まれているのにエラーも返ってくる場合があるので、その場合は（致命的な）エラーではないと判断する
-            if 'errors' in response_json and 'data' not in response_json:
-                # Twitter API のエラーコードとエラーメッセージを取得
-                # このエラーコードは API v1.1 の頃と変わっていない
-                errors = response_json.get('errors')
-                if isinstance(errors, list) and len(errors) > 0:
-                    response_error_code = errors[0].get('code')
-                    response_error_message = errors[0].get('message', '')
-                    # 想定外のエラーコードが返ってきた場合のエラーメッセージ
-                    alternative_error_message = f'Code: {response_error_code} / Message: {response_error_message}'
-                    print(f'[ERROR] [TwitterGraphQLAPI] Failed to invoke GraphQL API ({alternative_error_message})')
-                    # エラーコードに対応するエラーメッセージを返し、対応するものがない場合は alternative_error_message を返す
-                    return error_message_prefix + ERROR_MESSAGES.get(response_error_code, alternative_error_message)
+        # レスポンスを JSON としてパース
+        response_json: dict[str, Any] | None = None
+        if raw_response is not None:
+            # JavaScript 側で既にパース済み
+            response_json = raw_response
+        elif raw_response_text:
+            # JavaScript 側でパースに失敗した場合、Python 側で再試行
+            try:
+                response_json = json.loads(raw_response_text)
+            except Exception:
+                print('[ERROR] [TwitterGraphQLAPI] Failed to parse response as JSON.')
+                # 注: exc_info の代わりに traceback を出力
+                traceback.print_exc()
+                return error_message_prefix + 'Twitter API のレスポンスを JSON としてパースできませんでした。'
 
-            # API レスポンスにエラーが含まれていないが、'data' キーが存在しない場合
-            # 実装時点の GraphQL API は必ず成功時は 'data' キーの下にレスポンスが格納されるはず
-            # もし 'data' キーが存在しない場合は、API 仕様が変更されている可能性がある
-            elif 'data' not in response_json:
-                print('[ERROR] [TwitterGraphQLAPI] Response does not have "data" key.')
-                return (
-                    error_message_prefix
-                    + 'Twitter API のレスポンスに "data" キーが存在しません。開発者に修正を依頼してください。'
-                )
+        if response_json is None:
+            print('[ERROR] [TwitterGraphQLAPI] Failed to parse response as JSON.')
+            return error_message_prefix + 'Twitter API のレスポンスを JSON としてパースできませんでした。'
 
-            # ここまで来たら (中身のデータ構造はともかく) API レスポンスの取得には成功しているはず
-            return response_json['data']
+        # API レスポンスにエラーが含まれていて、かつ data キーが存在しない場合
+        # API レスポンスは Twitter の仕様変更で変わりうるので、ここで判定されなかったと言ってエラーでないとは限らない
+        # なぜか正常にレスポンスが含まれているのにエラーも返ってくる場合があるので、その場合は（致命的な）エラーではないと判断する
+        if 'errors' in response_json and 'data' not in response_json:
+            # Twitter API のエラーコードとエラーメッセージを取得
+            # このエラーコードは API v1.1 の頃と変わっていない
+            response_error_code = response_json['errors'][0]['code']
+            response_error_message = response_json['errors'][0]['message']
 
-        # API リクエストに失敗した場合
-        else:
-            # エラー情報を取得
-            error_details = result_value.get('error')
-            if not isinstance(error_details, dict):
-                print('[ERROR] [TwitterGraphQLAPI] Error details is not a dict.')
-                return error_message_prefix + 'Twitter API から不正なレスポンスが返されました。'
+            # 想定外のエラーコードが返ってきた場合のエラーメッセージ
+            alternative_error_message = f'Code: {response_error_code} / Message: {response_error_message}'
+            print(f'[ERROR] [TwitterGraphQLAPI] Failed to invoke GraphQL API ({alternative_error_message})')
 
-            # HTTP ステータスコードが 200 系以外の場合
-            status = error_details.get('status')
-            if status is not None and not (200 <= status < 300):
-                print(f'[ERROR] [TwitterGraphQLAPI] Failed to invoke GraphQL API. (HTTP Error {status})')
-                # 注: ブラウザ経由のため、response.text の取得は困難
-                return error_message_prefix + f'Twitter API から HTTP {status} エラーが返されました。'
+            # エラーコードに対応するエラーメッセージを返し、対応するものがない場合は alternative_error_message を返す
+            return error_message_prefix + ERROR_MESSAGES.get(response_error_code, alternative_error_message)
 
-            # API レスポンスにエラーが含まれている場合
-            errors = error_details.get('errors')
-            if errors is not None and isinstance(errors, list) and len(errors) > 0:
-                error_code = errors[0].get('code')
-                error_message = errors[0].get('message', '')
-                if error_code is not None:
-                    # 想定外のエラーコードが返ってきた場合のエラーメッセージ
-                    alternative_error_message = f'Code: {error_code} / Message: {error_message}'
-                    print(f'[ERROR] [TwitterGraphQLAPI] Failed to invoke GraphQL API ({alternative_error_message})')
-                    # エラーコードに対応するエラーメッセージを返し、対応するものがない場合は alternative_error_message を返す
-                    return error_message_prefix + ERROR_MESSAGES.get(error_code, alternative_error_message)
-                else:
-                    return error_message_prefix + (error_message if error_message else '不明なエラーが発生しました。')
+        # API レスポンスにエラーが含まれていないが、'data' キーが存在しない場合
+        # 実装時点の GraphQL API は必ず成功時は 'data' キーの下にレスポンスが格納されるはず
+        # もし 'data' キーが存在しない場合は、API 仕様が変更されている可能性がある
+        if 'data' not in response_json:
+            print('[ERROR] [TwitterGraphQLAPI] Response does not have "data" key.')
+            return (
+                error_message_prefix
+                + 'Twitter API のレスポンスに "data" キーが存在しません。開発者に修正を依頼してください。'
+            )
 
-            # その他のエラー
-            error_message = error_details.get('message', '')
-            if error_message:
-                return error_message_prefix + error_message
-            else:
-                return error_message_prefix + '不明なエラーが発生しました。'
+        # ここまで来たら (中身のデータ構造はともかく) API レスポンスの取得には成功しているはず
+        return response_json['data']
 
     # 接続エラー（サーバーメンテナンスやタイムアウトなど）
     except Exception:
@@ -389,29 +387,55 @@ async def main():
         print(f'[DEBUG] Error during setup: {e}')
         return
 
+    await asyncio.sleep(3)
+
     # CreateTweet API を呼び出す
-    print('[DEBUG] Calling CreateTweet API...')
-    # リクエストペイロードを構築
-    request_payload = {
-        'tweet_text': f'Hello, World! {datetime.now().isoformat()}',
-        'dark_request': False,
-        'media': {'media_entities': [], 'possibly_sensitive': False},
-        'semantic_annotation_ids': [],
-        'disallowed_reply_options': None,
-    }
+    # print('[DEBUG] Calling CreateTweet API...')
+    # result = await invokeGraphQLAPI(
+    #     page=page,
+    #     endpoint_name='CreateTweet',
+    #     variables={
+    #         'tweet_text': f'Hello, World! {datetime.now().isoformat()}',
+    #         'dark_request': False,
+    #         'media': {'media_entities': [], 'possibly_sensitive': False},
+    #         'semantic_annotation_ids': [],
+    #         'disallowed_reply_options': None,
+    #     },
+    #     error_message_prefix='ツイートの送信に失敗しました。',
+    # )
+    # if isinstance(result, str):
+    #     # エラーメッセージが返された場合
+    #     print('[DEBUG] CreateTweet API call failed.')
+    #     print(f'[DEBUG] Error: {result}')
+    # else:
+    #     # 成功時はレスポンスデータが返される
+    #     print('[DEBUG] CreateTweet API call succeeded.')
+    #     print('[DEBUG] Result:')
+    #     pprint(result)
+
+    # await asyncio.sleep(110)
+
+    # HomeLatestTimeline API を呼び出す
+    print('[DEBUG] Calling HomeLatestTimeline API...')
     result = await invokeGraphQLAPI(
         page=page,
-        endpoint_name='CreateTweet',
-        variables=request_payload,
+        endpoint_name='HomeLatestTimeline',
+        variables={
+            'count': 20,
+            'includePromotedContent': True,
+            'latestControlAvailable': True,
+            'requestContext': 'launch',
+            'seenTweetIds': [],
+        },
         error_message_prefix='ツイートの送信に失敗しました。',
     )
     if isinstance(result, str):
         # エラーメッセージが返された場合
-        print('[DEBUG] CreateTweet API call failed.')
+        print('[DEBUG] HomeLatestTimeline API call failed.')
         print(f'[DEBUG] Error: {result}')
     else:
         # 成功時はレスポンスデータが返される
-        print('[DEBUG] CreateTweet API call succeeded.')
+        print('[DEBUG] HomeLatestTimeline API call succeeded.')
         print('[DEBUG] Result:')
         pprint(result)
 
