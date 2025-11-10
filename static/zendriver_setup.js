@@ -4,6 +4,7 @@ window.__setupPromise = (async () => {
 
     // operationInfo を収集する必要がある operationName のセット
     const requiredOperationNames = new Set([
+        'Viewer',
         'CreateTweet',
         'CreateRetweet',
         'DeleteRetweet',
