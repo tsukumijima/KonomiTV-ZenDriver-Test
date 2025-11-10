@@ -145,6 +145,29 @@ class TwitterGraphQLAPI:
             logging.error('[TwitterGraphQLAPI] Failed to connect to Twitter GraphQL API:', exc_info=ex)
             return error_message_prefix + 'Twitter API に接続できませんでした。'
 
+        # GraphQL API リクエスト完了後、更新された可能性があるブラウザの Cookie を TwitterAccount.access_token_secret にセット
+        ## こうすることで、基本的にヘッドレスブラウザと DB 間で Cookie が同期される
+        ## API リクエストの成功・失敗に関わらず常に API リクエスト完了後に常に実行すべき
+        # TODO: 実際のプロジェクトでは .save() を実行すべきだが、今回は PoC なのでコメントアウト
+        cookies_txt_content = await browser.saveTwitterCookiesToNetscapeFormat()
+        self.twitter_account.access_token_secret = cookies_txt_content
+        # self.twitter_account.save()
+
+        async def OnShutdown() -> None:
+            # タイムアウト時間に到達するまで待つ
+            await asyncio.sleep(self.BROWSER_IDLE_TIMEOUT)
+            # GraphQL API の前回呼び出し時刻を確認し、タイムアウト時間が経過している場合のみシャットダウン
+            current_time = time.time()
+            if current_time - self.last_graphql_api_call_time >= self.BROWSER_IDLE_TIMEOUT:
+                logging.info(
+                    f'[TwitterGraphQLAPI] Shutting down browser after {self.BROWSER_IDLE_TIMEOUT} seconds of inactivity.'
+                )
+                await self.browser.shutdown()
+
+        # 一定時間後にブラウザをシャットダウンするタスクをスケジュール
+        ## これも API リクエストの成功・失敗に関わらず常に API リクエスト完了後に常に実行すべき
+        self.shutdown_task = asyncio.create_task(OnShutdown())
+
         # 生のレスポンスデータを取得
         parsed_response = raw_response['parsedResponse']
         status_code = raw_response['statusCode']
@@ -217,27 +240,6 @@ class TwitterGraphQLAPI:
                 error_message_prefix
                 + 'Twitter API のレスポンスに "data" キーが存在しません。開発者に修正を依頼してください。'
             )
-
-        # GraphQL API リクエスト完了後、更新された可能性があるブラウザの Cookie を TwitterAccount.access_token_secret にセット
-        ## こうすることで、基本的にヘッドレスブラウザと DB 間で Cookie が同期される
-        # TODO: 実際のプロジェクトでは .save() を実行すべきだが、今回は PoC なのでコメントアウト
-        cookies_txt_content = await browser.saveTwitterCookiesToNetscapeFormat()
-        self.twitter_account.access_token_secret = cookies_txt_content
-        # self.twitter_account.save()
-
-        # 一定時間後にブラウザをシャットダウンするタスクをスケジュール
-        async def OnShutdown() -> None:
-            await asyncio.sleep(self.BROWSER_IDLE_TIMEOUT)
-            # GraphQL API の前回呼び出し時刻を確認
-            current_time = time.time()
-            # タイムアウト時間が経過している場合のみシャットダウン
-            if current_time - self.last_graphql_api_call_time >= self.BROWSER_IDLE_TIMEOUT:
-                logging.info(
-                    f'[TwitterGraphQLAPI] Shutting down browser after {self.BROWSER_IDLE_TIMEOUT} seconds of inactivity.'
-                )
-                await self.browser.shutdown()
-
-        self.shutdown_task = asyncio.create_task(OnShutdown())
 
         # ここまで来たら (中身のデータ構造はともかく) GraphQL API レスポンスの取得には成功しているはず
         return response_json['data']
