@@ -1,6 +1,9 @@
 import asyncio
+import json
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
+from pprint import pprint
 
 import zendriver as zd
 from zendriver import cdp
@@ -192,8 +195,62 @@ async def main():
         print('[DEBUG] Setup completed successfully.')
     except TimeoutError:
         print('[DEBUG] Timeout: Breakpoint was not hit or setup did not complete within 30 seconds.')
+        return
     except Exception as e:
         print(f'[DEBUG] Error during setup: {e}')
+        return
+
+    # CreateTweet API を呼び出す
+    print('[DEBUG] Calling CreateTweet API...')
+    try:
+        # リクエストペイロードを構築
+        request_payload = {
+            'tweet_text': f'Hello, World! {datetime.now().isoformat()}',
+            'dark_request': False,
+            'media': {'media_entities': [], 'possibly_sensitive': False},
+            'semantic_annotation_ids': [],
+            'disallowed_reply_options': None,
+        }
+        # JavaScript コードを構築（JSON を文字列化して渡す）
+        js_code = f"""
+        (async () => {{
+            try {{
+                const requestPayload = {json.dumps(request_payload)};
+                const result = await window.__invokeGraphQLAPI('CreateTweet', requestPayload);
+                return {{ success: true, result: result }};
+            }} catch (error) {{
+                return {{ success: false, error: error.toString(), stack: error.stack }};
+            }}
+        }})()
+        """
+        # API を呼び出して結果を取得
+        result, exception = await page.send(
+            cdp.runtime.evaluate(
+                expression=js_code,
+                await_promise=True,
+                return_by_value=True,
+            )
+        )
+        if exception is not None:
+            print(f'[DEBUG] Exception occurred while calling API: {exception}')
+        else:
+            if result.value is not None:
+                result_value = result.value
+                if result_value.get('success') is True:
+                    print('[DEBUG] CreateTweet API call succeeded.')
+                    print('[DEBUG] Result:')
+                    pprint(result_value.get('result'))
+                else:
+                    print('[DEBUG] CreateTweet API call failed.')
+                    print('[DEBUG] Error:')
+                    pprint(result_value.get('error'))
+                    if result_value.get('stack'):
+                        print('[DEBUG] Stack trace:')
+                        print(result_value.get('stack'))
+            else:
+                print('[DEBUG] Result value is None.')
+    except Exception as e:
+        print(f'[DEBUG] Error calling CreateTweet API: {e}')
 
     await asyncio.sleep(10)
 
