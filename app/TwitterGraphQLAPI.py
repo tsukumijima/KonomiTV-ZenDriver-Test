@@ -231,6 +231,9 @@ class TwitterGraphQLAPI:
             current_time = time.time()
             # タイムアウト時間が経過している場合のみシャットダウン
             if current_time - self.last_graphql_api_call_time >= self.BROWSER_IDLE_TIMEOUT:
+                logging.info(
+                    f'[TwitterGraphQLAPI] Shutting down browser after {self.BROWSER_IDLE_TIMEOUT} seconds of inactivity.'
+                )
                 await self.browser.shutdown()
 
         self.shutdown_task = asyncio.create_task(OnShutdown())
@@ -305,13 +308,13 @@ class TwitterGraphQLAPI:
                 return schemas.PostTweetResult(
                     is_success=False,
                     detail='ツイートを送信しましたが、ツイート ID を取得できませんでした。開発者に修正を依頼してください。',
-                    tweet_url='https://twitter.com/i/status/__error__',
+                    tweet_url='https://x.com/i/status/__error__',
                 )
 
             return schemas.PostTweetResult(
                 is_success=True,
                 detail='ツイートを送信しました。',
-                tweet_url=f'https://twitter.com/i/status/{tweet_id}',
+                tweet_url=f'https://x.com/i/status/{tweet_id}',
             )
 
     async def createRetweet(self, tweet_id: str) -> schemas.TwitterAPIResult:

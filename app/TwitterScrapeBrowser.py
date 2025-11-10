@@ -52,14 +52,19 @@ class TwitterScrapeBrowser:
             setup_complete_future = asyncio.get_running_loop().create_future()
 
             # ZenDriver でブラウザを起動
-            logging.debug(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Starting browser...')
+            logging.info(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Starting browser...')
             self.browser = await zendriver.start(
+                # ユーザーデータディレクトリはあえて設定せず、立ち上げたプロセスが終了したらプロファイルも消えるようにする
+                # Cookie に関しては別途 DB と同期・永続化されていて、毎回セットアップ時に復元されるため問題はない
+                user_data_dir=None,
+                # ヘッドレスモードではなく GUI モードで起動する
                 headless=False,
+                # ブラウザは現在の環境にインストールされているものを自動選択させる
+                browser='auto',
             )
-            logging.debug(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Browser started.')
+            logging.info(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Browser started.')
 
             # まず空のタブを開く
-            logging.debug(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Opening blank page...')
             self.page = await self.browser.get('about:blank')
             logging.debug(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Blank page opened.')
 
@@ -68,12 +73,12 @@ class TwitterScrapeBrowser:
             if self.twitter_account.access_token_secret:
                 cookie_params = self.__parseNetscapeCookieFile(self.twitter_account.access_token_secret)
                 logging.debug(
-                    f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Found {len(cookie_params)} cookies in cookies.txt'
+                    f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Found {len(cookie_params)} cookies in cookies.txt.'
                 )
                 # 読み込んだ CookieParam のリストを CookieJar に一括で設定
                 try:
                     await self.browser.cookies.set_all(cookie_params)
-                    logging.debug(
+                    logging.info(
                         f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Successfully set {len(cookie_params)} cookies.'
                     )
                 except Exception as ex:
@@ -81,9 +86,8 @@ class TwitterScrapeBrowser:
                         f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Error setting cookies: {ex}',
                         exc_info=ex,
                     )
-                logging.debug(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Cookies loaded.')
             else:
-                logging.debug(
+                logging.warning(
                     f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] cookies.txt content is empty, skipping Cookie loading.'
                 )
 
@@ -109,7 +113,7 @@ class TwitterScrapeBrowser:
                             return_by_value=True,
                         )
                     )
-                    logging.debug(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] setup.js executed.')
+                    logging.info(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] setup.js executed.')
                     if exception is not None:
                         # 実行中になんらかの例外が発生した場合
                         setup_complete_future.set_exception(Exception(f'Failed to execute setup.js: {exception}'))
@@ -121,7 +125,7 @@ class TwitterScrapeBrowser:
                     # 再開後、window.__setupPromise が解決されるまで待つ
                     try:
                         await asyncio.sleep(1)  # 再開後に少し待つ (でないと window.__setupPromise がセットされていない)
-                        logging.debug(
+                        logging.info(
                             f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Waiting for setup.js to be resolved...'
                         )
                         result, exception = await page.send(
@@ -131,9 +135,7 @@ class TwitterScrapeBrowser:
                                 return_by_value=True,
                             )
                         )
-                        logging.debug(
-                            f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] setup.js evaluated.'
-                        )
+                        logging.info(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] setup.js evaluated.')
                         if exception is not None:
                             setup_complete_future.set_exception(
                                 Exception(f'Failed to wait for setup promise: {exception}')
@@ -141,7 +143,7 @@ class TwitterScrapeBrowser:
                         else:
                             # result.value が厳密に True であることを確認（undefined の可能性を排除）
                             if result.value is True:
-                                logging.debug(
+                                logging.info(
                                     f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] setup.js resolved: true (strictly verified)'
                                 )
                                 setup_complete_future.set_result(True)
@@ -175,7 +177,7 @@ class TwitterScrapeBrowser:
             # setup.js に記述したセットアップ処理が完了するまで待つ
             try:
                 await asyncio.wait_for(setup_complete_future, timeout=15.0)
-                logging.debug(
+                logging.info(
                     f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Setup completed successfully.'
                 )
                 # セットアップ完了後、もうブレークポイントを打つ必要はないのでデバッガを無効化
@@ -291,15 +293,13 @@ class TwitterScrapeBrowser:
         # 全ての Cookie を取得
         all_cookies = await self.browser.cookies.get_all(requests_cookie_format=False)
         # requests_cookie_format=False なので cdp.network.Cookie のリストが返される
-        # x.com や twitter.com に関連する Cookie をフィルタリング
+        # x.com に関連する Cookie をフィルタリング
         twitter_cookies: list[cdp.network.Cookie] = [
-            c
-            for c in all_cookies
-            if isinstance(c, cdp.network.Cookie) and ('x.com' in c.domain or 'twitter.com' in c.domain)
+            c for c in all_cookies if isinstance(c, cdp.network.Cookie) and ('x.com' in c.domain)
         ]
 
         if not twitter_cookies:
-            logging.debug(
+            logging.warning(
                 f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] No Twitter-related cookies found, skipping save.'
             )
             return self.twitter_account.access_token_secret
@@ -339,12 +339,10 @@ class TwitterScrapeBrowser:
             return
 
         # ブラウザを停止
-        logging.debug(
-            f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Waiting for browser to terminate...'
-        )
+        logging.info(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Waiting for browser to terminate...')
         try:
             await self.browser.stop()
-            logging.debug(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Browser terminated.')
+            logging.info(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Browser terminated.')
         except Exception as ex:
             logging.error(
                 f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Error while terminating browser: {ex}',
