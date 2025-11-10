@@ -8,8 +8,11 @@ typecheck = "pyright"
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.12"
+pydantic = "^2.10.3"
 pyright = "^1.1.403"
 ruff = "^0.9.1"
+tortoise-orm = "^0.23.0"
+uvicorn = {version = "^0.34.0", extras = ["standard"]}
 zendriver = "^0.15.0"
 
 [tool.poetry.group.dev.dependencies]
