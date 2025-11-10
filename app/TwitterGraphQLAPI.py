@@ -243,6 +243,103 @@ class TwitterGraphQLAPI:
         # ここまで来たら (中身のデータ構造はともかく) GraphQL API レスポンスの取得には成功しているはず
         return response_json['data']
 
+    async def fetchLoggedViewer(
+        self,
+    ) -> schemas.TweetUser | schemas.TwitterAPIResult:
+        """
+        ログイン中のユーザー情報を取得する
+
+        Returns:
+            schemas.TweetUser | schemas.TwitterAPIResult: ユーザー情報 (失敗時はエラーメッセージ)
+        """
+
+        # Twitter GraphQL API にリクエスト
+        response = await self.invokeGraphQLAPI(
+            endpoint_name='Viewer',
+            variables={
+                'withCommunitiesMemberships': True,
+            },
+            additional_flags={
+                'fieldToggles': {
+                    'isDelegate': False,
+                    'withAuxiliaryUserLabels': True,
+                },
+            },
+            error_message_prefix='ユーザー情報の取得に失敗しました。',
+        )
+
+        # 戻り値が str の場合、ユーザー情報の取得に失敗している (エラーメッセージが返ってくる)
+        if isinstance(response, str):
+            logging.error(f'[TwitterGraphQLAPI] Failed to fetch logged viewer: {response}')
+            return schemas.TwitterAPIResult(
+                is_success=False,
+                detail=response,  # エラーメッセージをそのまま返す
+            )
+
+        # レスポンスからユーザー情報を取得
+        ## レスポンス構造: data.viewer.user_results.result
+        try:
+            viewer = response.get('viewer', {})
+            user_results = viewer.get('user_results', {})
+            result = user_results.get('result', {})
+
+            # 必要な情報が存在しない場合はエラーを返す
+            if not result:
+                logging.error('[TwitterGraphQLAPI] Failed to fetch logged viewer: user_results.result not found')
+                return schemas.TwitterAPIResult(
+                    is_success=False,
+                    detail='ユーザー情報の取得に失敗しました。レスポンスにユーザー情報が含まれていません。開発者に修正を依頼してください。',
+                )
+
+            # ユーザー ID を取得
+            user_id = result.get('rest_id')
+            if not user_id:
+                logging.error('[TwitterGraphQLAPI] Failed to fetch logged viewer: rest_id not found')
+                return schemas.TwitterAPIResult(
+                    is_success=False,
+                    detail='ユーザー情報の取得に失敗しました。ユーザー ID を取得できませんでした。開発者に修正を依頼してください。',
+                )
+
+            # ユーザー名とスクリーンネームを取得
+            core = result.get('core', {})
+            name = core.get('name', '')
+            screen_name = core.get('screen_name', '')
+            if not name or not screen_name:
+                logging.error('[TwitterGraphQLAPI] Failed to fetch logged viewer: name or screen_name not found')
+                return schemas.TwitterAPIResult(
+                    is_success=False,
+                    detail='ユーザー情報の取得に失敗しました。ユーザー名またはスクリーンネームを取得できませんでした。開発者に修正を依頼してください。',
+                )
+
+            # アイコン URL を取得
+            avatar = result.get('avatar', {})
+            icon_url = avatar.get('image_url', '')
+            if not icon_url:
+                logging.error('[TwitterGraphQLAPI] Failed to fetch logged viewer: image_url not found')
+                return schemas.TwitterAPIResult(
+                    is_success=False,
+                    detail='ユーザー情報の取得に失敗しました。アイコン URL を取得できませんでした。開発者に修正を依頼してください。',
+                )
+
+            # (ランダムな文字列)_normal.jpg だと画像サイズが小さいので、(ランダムな文字列).jpg に置換
+            icon_url = icon_url.replace('_normal', '')
+
+            return schemas.TweetUser(
+                id=str(user_id),
+                name=name,
+                screen_name=screen_name,
+                icon_url=icon_url,
+            )
+
+        except Exception as ex:
+            # 予期しないエラーが発生した場合
+            logging.error('[TwitterGraphQLAPI] Failed to fetch logged viewer:', exc_info=ex)
+            logging.error(f'[TwitterGraphQLAPI] Response: {response}')
+            return schemas.TwitterAPIResult(
+                is_success=False,
+                detail='ユーザー情報の取得に失敗しました。予期しないエラーが発生しました。開発者に修正を依頼してください。',
+            )
+
     async def createTweet(
         self,
         tweet: str,

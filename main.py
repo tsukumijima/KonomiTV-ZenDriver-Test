@@ -33,17 +33,15 @@ async def main():
     # TwitterGraphQLAPI インスタンスを取得（シングルトン）
     api = TwitterGraphQLAPI(twitter_account)
 
-    # HomeLatestTimeline API を呼び出す
-    logging.info('Calling HomeLatestTimeline API...')
-    result = await api.homeLatestTimeline(
-        count=20,
-    )
+    # 現在のログイン中ユーザー情報取得 API を呼び出す
+    logging.info('Calling Viewer API...')
+    result = await api.fetchLoggedViewer()
     if isinstance(result, str):
         # エラーメッセージが返された場合
-        logging.error(f'HomeLatestTimeline API call failed: {result}')
+        logging.error(f'Viewer API call failed: {result}')
     else:
         # 成功時はレスポンスデータが返される
-        logging.info('HomeLatestTimeline API call succeeded.')
+        logging.info('Viewer API call succeeded.')
         logging.info('Result:')
         pprint(result)
 
