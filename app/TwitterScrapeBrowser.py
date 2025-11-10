@@ -338,28 +338,37 @@ class TwitterScrapeBrowser:
     async def shutdown(self) -> None:
         """
         ブラウザをシャットダウンする
+        シャットダウン中は setup() や shutdown() が同時に呼ばれないように、self.setup_lock を使用して排他制御する
         """
 
-        if self.browser is None:
-            logging.warning(
-                f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Browser is not initialized, skipping shutdown.'
-            )
-            return
+        # セットアップ・シャットダウン処理の排他制御
+        ## シャットダウン中に setup が呼ばれると状態が競合するため、同じロックを使用する
+        async with self.setup_lock:
+            if self.browser is None:
+                logging.warning(
+                    f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Browser is not initialized, skipping shutdown.'
+                )
+                return
 
-        # ブラウザを停止
-        logging.info(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Waiting for browser to terminate...')
-        try:
-            await self.browser.stop()
-            logging.info(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Browser terminated.')
-        except Exception as ex:
-            logging.error(
-                f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Error while terminating browser: {ex}',
-                exc_info=ex,
-            )
+            # セットアップ完了フラグをリセット（シャットダウン開始時点でセットアップ状態を無効化）
+            ## これにより、シャットダウン中に setup が呼ばれた場合でも、シャットダウン完了後に再度セットアップが必要になる
+            self.is_setup_complete = False
 
-        self.browser = None
-        self.page = None
-        self.is_setup_complete = False
+            # ブラウザを停止
+            logging.info(
+                f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Waiting for browser to terminate...'
+            )
+            try:
+                await self.browser.stop()
+                logging.info(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Browser terminated.')
+            except Exception as ex:
+                logging.error(
+                    f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Error while terminating browser: {ex}',
+                    exc_info=ex,
+                )
+
+            self.browser = None
+            self.page = None
 
     @staticmethod
     def __parseNetscapeCookieFile(cookies_content: str) -> list[cdp.network.CookieParam]:
