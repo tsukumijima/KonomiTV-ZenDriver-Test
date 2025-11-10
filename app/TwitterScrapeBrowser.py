@@ -31,15 +31,16 @@ class TwitterScrapeBrowser:
         # 現在アクティブなタブ（ページ）インスタンス
         self.page: Tab | None = None
 
-        # セットアップ処理の排他制御用ロック
+        # セットアップ・シャットダウン処理の排他制御用ロック
+        ## setup と shutdown が同時に実行されないようにするため、同じロックを使用する
         self.setup_lock = asyncio.Lock()
         # セットアップ処理が完了したかどうかのフラグ
         self.is_setup_complete = False
 
     async def setup(self) -> None:
         """
-        ブラウザをセットアップする
-        既にセットアップ済みの場合は何もしない
+        ヘッドレスブラウザを起動し、Cookie の供給などのセットアップ処理を行う
+        既にセットアップ済みの場合は何も行われない
         """
 
         # セットアップ処理が複数進行していないことを確認
@@ -71,7 +72,7 @@ class TwitterScrapeBrowser:
             # cookies.txt の内容をパースして Cookie を設定
             # access_token_secret に cookies.txt の内容が入っている想定
             if self.twitter_account.access_token_secret:
-                cookie_params = self.__parseNetscapeCookieFile(self.twitter_account.access_token_secret)
+                cookie_params = self.parseNetscapeCookieFile(self.twitter_account.access_token_secret)
                 logging.debug(
                     f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Found {len(cookie_params)} cookies in cookies.txt.'
                 )
@@ -105,8 +106,9 @@ class TwitterScrapeBrowser:
                 assert self.page is not None
                 page = self.page
                 try:
-                    # ブレークポイント停止中に zendriver_setup.js のコードを設置する
-                    # await_promise は指定しない（デフォルトは False）ので、スクリプトは設置されるが待機しない
+                    # ブレークポイント停止中に zendriver_setup.js のコードをブラウザタブ側に設置する
+                    ## await_promise は指定しない（デフォルトは False）ので、スクリプトは設置されるが待機しない
+                    ## その後、ブレークポイントから実行を再開すると、設置されたスクリプトが実行される
                     _, exception = await page.send(
                         cdp.runtime.evaluate(
                             expression=setup_js_code,
@@ -124,17 +126,18 @@ class TwitterScrapeBrowser:
                 except Exception as ex:
                     setup_complete_future.set_exception(ex)
                 finally:
-                    # 実行を再開（再開後、zendriver_setup.js 内の window.__setupPromise が実行される）
+                    # ブレークポイントから実行を再開
                     await page.send(cdp.debugger.resume())
-                    # 再開後、window.__setupPromise が解決されるまで待つ
                     try:
-                        await asyncio.sleep(1)  # 再開後に少し待つ (でないと window.__setupPromise がセットされていない)
+                        # 再開後に少し待つ (でないと window.__invokeGraphQLAPISetupPromise 自体がまだセットされていない可能性がある)
+                        await asyncio.sleep(1)
                         logging.info(
                             f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Waiting for zendriver_setup.js to be resolved...'
                         )
+                        # 再開後、window.__invokeGraphQLAPISetupPromise の Promise が解決されるまで待つ
                         result, exception = await page.send(
                             cdp.runtime.evaluate(
-                                expression='window.__setupPromise',
+                                expression='window.__invokeGraphQLAPISetupPromise',
                                 await_promise=True,
                                 return_by_value=True,
                             )
@@ -150,7 +153,7 @@ class TwitterScrapeBrowser:
                             # result.value が厳密に True であることを確認（undefined の可能性を排除）
                             if result.value is True:
                                 logging.debug(
-                                    f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] zendriver_setup.js resolved: true (strictly verified)'
+                                    f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] zendriver_setup.js resolved.'
                                 )
                                 setup_complete_future.set_result(True)
                             else:
@@ -198,18 +201,18 @@ class TwitterScrapeBrowser:
                         exc_info=ex,
                     )
                 self.is_setup_complete = True
-            except TimeoutError:
+            except TimeoutError as ex:
                 logging.error(
                     f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Timeout: Breakpoint was not hit or setup did not complete within 15 seconds.'
                 )
                 self.is_setup_complete = False
-                raise
+                raise ex
             except Exception as ex:
                 logging.error(
                     f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Error during setup: {ex}', exc_info=ex
                 )
                 self.is_setup_complete = False
-                raise
+                raise ex
 
     async def invokeGraphQLAPI(
         self,
@@ -218,8 +221,7 @@ class TwitterScrapeBrowser:
         additional_flags: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
-        Twitter Web App の GraphQL API に HTTP リクエストを送信する
-        実際には GraphQL と言いつつペイロードで JSON を渡しているので謎… (本当に GraphQL なのか？)
+        ヘッドレスブラウザ越しに、Twitter Web App が持つ内部 GraphQL API クライアントに対して HTTP リクエストの実行を要求する
         エラー処理は行わず、生のレスポンスデータを返す（エラー処理は TwitterGraphQLAPI 側で行う）
 
         Args:
@@ -231,8 +233,9 @@ class TwitterScrapeBrowser:
             dict[str, Any]: 生のレスポンスデータ（parsedResponse, statusCode, responseText, headers, requestError を含む）
         """
 
-        if self.page is None:
-            raise RuntimeError('Browser is not set up.')
+        # 通常、ブラウザが起動していない時にこのメソッドが呼ばれることはない（呼ばれた場合は何かがバグっている）
+        if self.browser is None or self.page is None:
+            raise RuntimeError('Browser or page is not initialized.')
 
         # JavaScript コードを構築（JSON を文字列化して渡す）
         # エラー処理は JavaScript 側で完結し、シリアライズ可能なデータを返す
@@ -287,16 +290,52 @@ class TwitterScrapeBrowser:
             'requestError': request_error,
         }
 
+    async def shutdown(self) -> None:
+        """
+        使われなくなったヘッドレスブラウザを安全にシャットダウンする
+        シャットダウン中は setup() や shutdown() が同時に呼ばれないように、self.setup_lock を使用して排他制御する
+        """
+
+        # セットアップ・シャットダウン処理の排他制御
+        ## シャットダウン中に setup が呼ばれると状態が競合するため、同じロックを使用する
+        async with self.setup_lock:
+            if self.browser is None:
+                logging.warning(
+                    f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Browser is not initialized, skipping shutdown.'
+                )
+                return
+
+            # セットアップ完了フラグをリセット（シャットダウン開始時点でセットアップ状態を無効化）
+            ## これにより、シャットダウン中に setup が呼ばれた場合でも、シャットダウン完了後に再度セットアップが必要になる
+            self.is_setup_complete = False
+
+            # ブラウザを停止
+            logging.info(
+                f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Waiting for browser to terminate...'
+            )
+            try:
+                await self.browser.stop()
+                logging.info(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Browser terminated.')
+            except Exception as ex:
+                logging.error(
+                    f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Error while terminating browser: {ex}',
+                    exc_info=ex,
+                )
+
+            self.browser = None
+            self.page = None
+
     async def saveTwitterCookiesToNetscapeFormat(self) -> str:
         """
-        ブラウザから x.com 関連の Cookie を取得し、Netscape フォーマットの文字列に変換して返す
+        起動中のヘッドレスブラウザから x.com 関連の Cookie を取得し、Netscape フォーマットの文字列に変換して返す
 
         Returns:
             str: Netscape フォーマットの Cookie ファイルの内容
         """
 
+        # 通常、ブラウザが起動していない時にこのメソッドが呼ばれることはない（呼ばれた場合は何かがバグっている）
         if self.browser is None:
-            return self.twitter_account.access_token_secret
+            raise RuntimeError('Browser is not initialized.')
 
         # 全ての Cookie を取得
         all_cookies = await self.browser.cookies.get_all(requests_cookie_format=False)
@@ -335,43 +374,8 @@ class TwitterScrapeBrowser:
 
         return '\n'.join(lines)
 
-    async def shutdown(self) -> None:
-        """
-        ブラウザをシャットダウンする
-        シャットダウン中は setup() や shutdown() が同時に呼ばれないように、self.setup_lock を使用して排他制御する
-        """
-
-        # セットアップ・シャットダウン処理の排他制御
-        ## シャットダウン中に setup が呼ばれると状態が競合するため、同じロックを使用する
-        async with self.setup_lock:
-            if self.browser is None:
-                logging.warning(
-                    f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Browser is not initialized, skipping shutdown.'
-                )
-                return
-
-            # セットアップ完了フラグをリセット（シャットダウン開始時点でセットアップ状態を無効化）
-            ## これにより、シャットダウン中に setup が呼ばれた場合でも、シャットダウン完了後に再度セットアップが必要になる
-            self.is_setup_complete = False
-
-            # ブラウザを停止
-            logging.info(
-                f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Waiting for browser to terminate...'
-            )
-            try:
-                await self.browser.stop()
-                logging.info(f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Browser terminated.')
-            except Exception as ex:
-                logging.error(
-                    f'[TwitterScrapeBrowser][@{self.twitter_account.screen_name}] Error while terminating browser: {ex}',
-                    exc_info=ex,
-                )
-
-            self.browser = None
-            self.page = None
-
     @staticmethod
-    def __parseNetscapeCookieFile(cookies_content: str) -> list[cdp.network.CookieParam]:
+    def parseNetscapeCookieFile(cookies_content: str) -> list[cdp.network.CookieParam]:
         """
         Netscape フォーマットの Cookie 文字列をパースして CookieParam に変換する
 

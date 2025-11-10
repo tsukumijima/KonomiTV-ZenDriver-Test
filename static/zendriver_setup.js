@@ -1,4 +1,4 @@
-window.__setupPromise = (async () => {
+window.__invokeGraphQLAPISetupPromise = (async () => {
     // 以下の実装を強く参考にした (thanks to @fa0311 !!)
     // ref: https://gist.github.com/fa0311/f36b00d36d6c4cf9e73c0dd5aefe3516
 
